@@ -162,12 +162,11 @@ if (isTest262Build) {
       debugBuild: !isProduction,
       enableAssertions: !isProduction,
       optimize: isProduction,
-      minifyNames: isProduction
-      // Here is where we could insert the JSBI -> native BigInt plugin if we
-      // could find a way to provide a separate bundle for modern browsers
-      // that can use native BigInt.
-      // Maybe use node's exports + a user-defined condition?
-      // https://nodejs.org/api/packages.html#resolving-user-conditions
+      minifyNames: isProduction,
+      babelConfig: {
+        plugins: ['transform-jsbi-to-bigint']
+      }
+      // The above is where we insert the JSBI -> native BigInt plugin.
     })
   };
   // A legacy build that
