@@ -12,18 +12,16 @@ import type {
   ZonedDateTimeReturn as Return
 } from './internaltypes';
 
-import JSBI from 'jsbi';
-
 const customResolvedOptions = DateTimeFormat.prototype.resolvedOptions as Intl.DateTimeFormat['resolvedOptions'];
 
 export class ZonedDateTime implements Temporal.ZonedDateTime {
-  constructor(epochNanosecondsParam: bigint | JSBI, timeZoneParam: string, calendarParam = 'iso8601') {
+  constructor(epochNanosecondsParam: bigint, timeZoneParam: string, calendarParam = 'iso8601') {
     // Note: if the argument is not passed, ToBigInt(undefined) will throw. This check exists only
     //       to improve the error message.
     if (arguments.length < 1) {
       throw new TypeError('missing argument: epochNanoseconds is required');
     }
-    const epochNanoseconds = ES.ToBigInt(epochNanosecondsParam);
+    const epochNanoseconds = epochNanosecondsParam;
     let timeZone = ES.RequireString(timeZoneParam);
     const { tzName, offsetMinutes } = ES.ParseTimeZoneIdentifier(timeZone);
     if (offsetMinutes === undefined) {
@@ -131,7 +129,7 @@ export class ZonedDateTime implements Temporal.ZonedDateTime {
   get offset(): Return['offset'] {
     ES.CheckReceiver(this, ES.IsTemporalZonedDateTime);
     const offsetNs = ES.GetOffsetNanosecondsFor(GetSlot(this, TIME_ZONE), GetSlot(this, EPOCHNANOSECONDS));
-    return ES.FormatUTCOffsetNanoseconds(offsetNs);
+    return ES.FormatUTCOffsetNanoseconds(BigInt(offsetNs));
   }
   get offsetNanoseconds(): Return['offsetNanoseconds'] {
     ES.CheckReceiver(this, ES.IsTemporalZonedDateTime);
@@ -152,7 +150,7 @@ export class ZonedDateTime implements Temporal.ZonedDateTime {
     let fields = {
       ...ES.ISODateToFields(calendar, isoDateTime.isoDate),
       ...isoDateTime.time,
-      offset: ES.FormatUTCOffsetNanoseconds(offsetNs)
+      offset: ES.FormatUTCOffsetNanoseconds(BigInt(offsetNs))
     };
     const partialZonedDateTime = ES.PrepareCalendarFields(
       calendar,
@@ -274,17 +272,17 @@ export class ZonedDateTime implements Temporal.ZonedDateTime {
 
       const startNs = ES.GetStartOfDay(timeZone, dateStart);
       assert(
-        JSBI.greaterThanOrEqual(thisNs, startNs),
+        thisNs >= startNs,
         'cannot produce an instant during a day that occurs before start-of-day instant'
       );
 
       const endNs = ES.GetStartOfDay(timeZone, dateEnd);
       assert(
-        JSBI.lessThan(thisNs, endNs),
+        thisNs < endNs,
         'cannot produce an instant during a day that occurs on or after end-of-day instant'
       );
 
-      const dayLengthNs = JSBI.subtract(endNs, startNs);
+      const dayLengthNs = endNs - startNs;
       const dayProgressNs = TimeDuration.fromEpochNsDiff(thisNs, startNs);
       const roundedDayNs = dayProgressNs.round(dayLengthNs, roundingMode);
       epochNanoseconds = roundedDayNs.addToEpochNs(startNs);
@@ -318,7 +316,7 @@ export class ZonedDateTime implements Temporal.ZonedDateTime {
     const other = ES.ToTemporalZonedDateTime(otherParam);
     const one = GetSlot(this, EPOCHNANOSECONDS);
     const two = GetSlot(other, EPOCHNANOSECONDS);
-    if (!JSBI.equal(JSBI.BigInt(one), JSBI.BigInt(two))) return false;
+    if (one !== two) return false;
     if (!ES.TimeZoneEquals(GetSlot(this, TIME_ZONE), GetSlot(other, TIME_ZONE))) return false;
     return ES.CalendarEquals(GetSlot(this, CALENDAR), GetSlot(other, CALENDAR));
   }
@@ -464,8 +462,8 @@ export class ZonedDateTime implements Temporal.ZonedDateTime {
     const two = ES.ToTemporalZonedDateTime(twoParam);
     const ns1 = GetSlot(one, EPOCHNANOSECONDS);
     const ns2 = GetSlot(two, EPOCHNANOSECONDS);
-    if (JSBI.lessThan(JSBI.BigInt(ns1), JSBI.BigInt(ns2))) return -1;
-    if (JSBI.greaterThan(JSBI.BigInt(ns1), JSBI.BigInt(ns2))) return 1;
+    if (BigInt(ns1) < BigInt(ns2)) return -1;
+    if (BigInt(ns1) > BigInt(ns2)) return 1;
     return 0;
   }
   [Symbol.toStringTag]!: 'Temporal.ZonedDateTime';

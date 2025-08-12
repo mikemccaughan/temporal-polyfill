@@ -1,4 +1,3 @@
-import type JSBI from 'jsbi';
 import type { Temporal } from '..';
 
 // Computes trunc(x / 10**p) and x % 10**p, returning { div, mod }, with
@@ -79,7 +78,7 @@ export function GetUnsignedRoundingMode(
 
 // Omits first step from spec algorithm so that it can be used both for
 // RoundNumberToIncrement and RoundTimeDurationToIncrement
-export function ApplyUnsignedRoundingMode<T extends number | JSBI>(
+export function ApplyUnsignedRoundingMode<T extends number | bigint>(
   r1: T,
   r2: T,
   cmp: -1 | 0 | 1,

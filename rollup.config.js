@@ -162,11 +162,7 @@ if (isTest262Build) {
       debugBuild: !isProduction,
       enableAssertions: !isProduction,
       optimize: isProduction,
-      minifyNames: isProduction,
-      babelConfig: {
-        plugins: ['transform-jsbi-to-bigint']
-      }
-      // The above is where we insert the JSBI -> native BigInt plugin.
+      minifyNames: isProduction
     })
   };
   // A legacy build that

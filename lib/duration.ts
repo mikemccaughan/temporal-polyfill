@@ -25,7 +25,6 @@ import {
 import { TimeDuration } from './timeduration';
 import type { Temporal } from '..';
 import type { DurationParams as Params, DurationReturn as Return } from './internaltypes';
-import JSBI from 'jsbi';
 
 export class Duration implements Temporal.Duration {
   constructor(
@@ -271,7 +270,7 @@ export class Duration implements Temporal.Duration {
     if (smallestUnit === 'day') {
       // First convert time units up to days
       const { quotient, remainder } = internalDuration.time.divmod(ES.DAY_NANOS);
-      let days = internalDuration.date.days + quotient + ES.TotalTimeDuration(remainder, 'day');
+      let days = internalDuration.date.days + ES.ToNumber(quotient) + ES.TotalTimeDuration(remainder, 'day');
       days = ES.RoundNumberToIncrement(days, roundingIncrement, roundingMode);
       const dateDuration = { years: 0, months: 0, weeks: 0, days };
       internalDuration = ES.CombineDateAndTimeDuration(dateDuration, TimeDuration.ZERO);
@@ -313,7 +312,7 @@ export class Duration implements Temporal.Duration {
 
       const isoDateTime = ES.CombineISODateAndTimeRecord(isoRelativeToDate, ES.MidnightTimeRecord());
       const targetDateTime = ES.CombineISODateAndTimeRecord(targetDate, targetTime);
-      return ES.DifferencePlainDateTimeWithTotal(isoDateTime, targetDateTime, calendar, unit);
+      return ES.ToNumber(ES.DifferencePlainDateTimeWithTotal(isoDateTime, targetDateTime, calendar, unit));
     }
 
     // No reference date to calculate difference relative to
@@ -416,7 +415,7 @@ export class Duration implements Temporal.Duration {
 
       const after1 = ES.AddZonedDateTime(epochNs, timeZone, calendar, duration1);
       const after2 = ES.AddZonedDateTime(epochNs, timeZone, calendar, duration2);
-      return ES.ComparisonResult(JSBI.toNumber(JSBI.subtract(after1, after2)));
+      return ES.ComparisonResult(Number(after1 - after2));
     }
 
     let d1 = duration1.date.days;

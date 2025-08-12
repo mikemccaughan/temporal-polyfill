@@ -1,9 +1,8 @@
 import { DEBUG, ENABLE_ASSERTS } from './debug';
-import JSBI from 'jsbi';
 
 import type { Temporal } from '..';
 import { assert, assertNotReached } from './assert';
-import { abs, compare, DAY_NANOS_JSBI, divmod, ensureJSBI, isEven, MILLION, ONE, TWO, ZERO } from './bigintmath';
+import { abs, compare, divmod, isEven, MILLION, ONE, TWO, ZERO } from './bigintmath';
 import type { CalendarImpl } from './calendar';
 import type {
   AnyTemporalLikeType,
@@ -63,16 +62,17 @@ import {
 
 const DAY_MS = 86400_000;
 export const DAY_NANOS = DAY_MS * 1e6;
+export const DAY_NANOS_BI = BigInt(DAY_NANOS);
 const MINUTE_NANOS = 60e9;
 // Instant range is 100 million days (inclusive) before or after epoch.
 const MS_MAX = DAY_MS * 1e8;
 const NS_MAX = epochMsToNs(MS_MAX);
-const NS_MIN = JSBI.unaryMinus(NS_MAX);
+const NS_MIN = -NS_MAX;
 // PlainDateTime range is 24 hours wider (exclusive) than the Instant range on
 // both ends, to allow for valid Instant=>PlainDateTime conversion for all
 // built-in time zones (whose offsets must have a magnitude less than 24 hours).
-const DATETIME_NS_MIN = JSBI.add(JSBI.subtract(NS_MIN, DAY_NANOS_JSBI), ONE);
-const DATETIME_NS_MAX = JSBI.subtract(JSBI.add(NS_MAX, DAY_NANOS_JSBI), ONE);
+const DATETIME_NS_MIN = DAY_NANOS_BI - NS_MIN + ONE;
+const DATETIME_NS_MAX = DAY_NANOS_BI + NS_MAX - ONE;
 // The pattern of leap years in the ISO 8601 calendar repeats every 400 years.
 // The constant below is the number of nanoseconds in 400 years. It is used to
 // avoid overflows when dealing with values at the edge legacy Date's range.
@@ -1706,7 +1706,7 @@ export function InterpretISODateTimeOffset(
   const possibleEpochNs = GetPossibleEpochNanoseconds(timeZone, dt);
   for (let index = 0; index < possibleEpochNs.length; index++) {
     const candidate = possibleEpochNs[index];
-    const candidateOffset = JSBI.toNumber(JSBI.subtract(utcEpochNs, candidate));
+    const candidateOffset = ToNumber(utcEpochNs - candidate);
     const roundedCandidateOffset = RoundNumberToIncrement(candidateOffset, 60e9, 'halfExpand');
     if (candidateOffset === offsetNs || (matchMinute && roundedCandidateOffset === offsetNs)) {
       return candidate;
@@ -1716,7 +1716,7 @@ export function InterpretISODateTimeOffset(
   // the user-provided offset doesn't match any instants for this time
   // zone and date/time.
   if (offsetOpt === 'reject') {
-    const offsetStr = FormatUTCOffsetNanoseconds(offsetNs);
+    const offsetStr = FormatUTCOffsetNanoseconds(BigInt(offsetNs));
     const dtStr = ISODateTimeToString(dt, 'iso8601', 'auto');
     throw new RangeError(`Offset ${offsetStr} is invalid for ${dtStr} in ${timeZone}`);
   }
@@ -1933,7 +1933,7 @@ export function CreateTemporalYearMonth(isoDate: ISODate, calendar: BuiltinCalen
   return result;
 }
 
-export function CreateTemporalInstantSlots(result: Temporal.Instant, epochNanoseconds: JSBI) {
+export function CreateTemporalInstantSlots(result: Temporal.Instant, epochNanoseconds: bigint) {
   ValidateEpochNanoseconds(epochNanoseconds);
   CreateSlots(result);
   SetSlot(result, EPOCHNANOSECONDS, epochNanoseconds);
@@ -1950,7 +1950,7 @@ export function CreateTemporalInstantSlots(result: Temporal.Instant, epochNanose
   }
 }
 
-export function CreateTemporalInstant(epochNanoseconds: JSBI) {
+export function CreateTemporalInstant(epochNanoseconds: bigint) {
   const TemporalInstant = GetIntrinsic('%Temporal.Instant%');
   const result: Temporal.Instant = Object.create(TemporalInstant.prototype);
   CreateTemporalInstantSlots(result, epochNanoseconds);
@@ -1959,7 +1959,7 @@ export function CreateTemporalInstant(epochNanoseconds: JSBI) {
 
 export function CreateTemporalZonedDateTimeSlots(
   result: Temporal.ZonedDateTime,
-  epochNanoseconds: JSBI,
+  epochNanoseconds: bigint,
   timeZone: string,
   calendar: BuiltinCalendarId
 ) {
@@ -1982,7 +1982,7 @@ export function CreateTemporalZonedDateTimeSlots(
 }
 
 export function CreateTemporalZonedDateTime(
-  epochNanoseconds: JSBI,
+  epochNanoseconds: bigint,
   timeZone: string,
   calendar: BuiltinCalendarId = 'iso8601'
 ) {
@@ -2149,26 +2149,26 @@ export function TimeZoneEquals(one: string, two: string) {
   }
 }
 
-export function GetOffsetNanosecondsFor(timeZone: string, epochNs: JSBI) {
-  const offsetMinutes = ParseTimeZoneIdentifier(timeZone).offsetMinutes;
-  if (offsetMinutes !== undefined) return offsetMinutes * 60e9;
+export function GetOffsetNanosecondsFor(timeZone: string, epochNs: bigint): number {
+  const offsetMinutes = ParseTimeZoneIdentifier(timeZone).offsetMinutes ?? 0;
+  if (offsetMinutes !== undefined) return offsetMinutes * 60_000_000_000; //60*1e9
 
   return GetNamedTimeZoneOffsetNanoseconds(timeZone, epochNs);
 }
 
-export function FormatUTCOffsetNanoseconds(offsetNs: number): string {
-  const sign = offsetNs < 0 ? '-' : '+';
-  const absoluteNs = Math.abs(offsetNs);
-  const hour = Math.floor(absoluteNs / 3600e9);
-  const minute = Math.floor(absoluteNs / 60e9) % 60;
-  const second = Math.floor(absoluteNs / 1e9) % 60;
-  const subSecondNs = absoluteNs % 1e9;
+export function FormatUTCOffsetNanoseconds(offsetNs: bigint): string {
+  const sign = offsetNs < 0n ? '-' : '+';
+  const absoluteNs = offsetNs < 0n ? -offsetNs : offsetNs;
+  const hour = Number(absoluteNs / 3600_000_000_000n);
+  const minute = Number(absoluteNs / 60_000_000_000n) % 60;
+  const second = Number(absoluteNs / 1_000_000_000n) % 60;
+  const subSecondNs = Number(absoluteNs % 1_000_000_000n);
   const precision = second === 0 && subSecondNs === 0 ? 'minute' : 'auto';
   const timeString = FormatTimeString(hour, minute, second, subSecondNs, precision);
   return `${sign}${timeString}`;
 }
 
-export function GetISODateTimeFor(timeZone: string, epochNs: JSBI) {
+export function GetISODateTimeFor(timeZone: string, epochNs: bigint) {
   const offsetNs = GetOffsetNanosecondsFor(timeZone, epochNs);
   let {
     isoDate: { year, month, day },
@@ -2188,7 +2188,7 @@ export function GetEpochNanosecondsFor(
 
 // TODO: See if this logic can be removed in favour of GetNamedTimeZoneEpochNanoseconds
 function DisambiguatePossibleEpochNanoseconds(
-  possibleEpochNs: JSBI[],
+  possibleEpochNs: bigint[],
   timeZone: string,
   isoDateTime: ISODateTime,
   disambiguation: NonNullable<Temporal.ToInstantOptions['disambiguation']>
@@ -2213,10 +2213,10 @@ function DisambiguatePossibleEpochNanoseconds(
   if (disambiguation === 'reject') throw new RangeError('multiple instants found');
   const utcns = GetUTCEpochNanoseconds(isoDateTime);
 
-  const dayBefore = JSBI.subtract(utcns, DAY_NANOS_JSBI);
+  const dayBefore = utcns - DAY_NANOS_BI;
   ValidateEpochNanoseconds(dayBefore);
   const offsetBefore = GetOffsetNanosecondsFor(timeZone, dayBefore);
-  const dayAfter = JSBI.add(utcns, DAY_NANOS_JSBI);
+  const dayAfter = DAY_NANOS_BI + utcns;
   ValidateEpochNanoseconds(dayAfter);
   const offsetAfter = GetOffsetNanosecondsFor(timeZone, dayAfter);
   const nanoseconds = offsetAfter - offsetBefore;
@@ -2292,7 +2292,7 @@ export function GetStartOfDay(timeZone: string, isoDate: ISODate) {
   assert(!IsOffsetTimeZoneIdentifier(timeZone), 'should only be reached with named time zone');
 
   const utcns = GetUTCEpochNanoseconds(isoDateTime);
-  const dayBefore = JSBI.subtract(utcns, DAY_NANOS_JSBI);
+  const dayBefore = utcns - DAY_NANOS_BI;
   ValidateEpochNanoseconds(dayBefore);
   return castExists(GetNamedTimeZoneNextTransition(timeZone, dayBefore));
 }
@@ -2651,7 +2651,7 @@ function GetNamedTimeZoneOffsetNanosecondsImpl(id: string, epochMilliseconds: nu
   return (utc - epochMilliseconds) * 1e6;
 }
 
-function GetNamedTimeZoneOffsetNanoseconds(id: string, epochNanoseconds: JSBI) {
+function GetNamedTimeZoneOffsetNanoseconds(id: string, epochNanoseconds: bigint): number {
   // Optimization: We get the offset nanoseconds only with millisecond
   // resolution, assuming that time zone offset changes don't happen in the
   // middle of a millisecond
@@ -2698,12 +2698,12 @@ function GetUTCEpochMilliseconds({
 function GetUTCEpochNanoseconds(isoDateTime: ISODateTime) {
   const ms = GetUTCEpochMilliseconds(isoDateTime);
   const subMs = isoDateTime.time.microsecond * 1e3 + isoDateTime.time.nanosecond;
-  return JSBI.add(epochMsToNs(ms), JSBI.BigInt(subMs));
+  return epochMsToNs(ms) + BigInt(subMs);
 }
 
-function GetISOPartsFromEpoch(epochNanoseconds: JSBI) {
+function GetISOPartsFromEpoch(epochNanoseconds: bigint) {
   let epochMilliseconds = epochNsToMs(epochNanoseconds, 'trunc');
-  let nanos = JSBI.toNumber(JSBI.remainder(epochNanoseconds, MILLION));
+  let nanos = Number(epochNanoseconds % BigInt(MILLION));
   if (nanos < 0) {
     nanos += 1e6;
     epochMilliseconds -= 1;
@@ -2728,7 +2728,7 @@ function GetISOPartsFromEpoch(epochNanoseconds: JSBI) {
 }
 
 // ts-prune-ignore-next TODO: remove this after tests are converted to TS
-export function GetNamedTimeZoneDateTimeParts(id: string, epochNanoseconds: JSBI) {
+export function GetNamedTimeZoneDateTimeParts(id: string, epochNanoseconds: bigint) {
   const {
     epochMilliseconds,
     time: { millisecond, microsecond, nanosecond }
@@ -2762,7 +2762,7 @@ function searchWindowForTransitions(id: string) {
   return DAY_MS * 19;
 }
 
-export function GetNamedTimeZoneNextTransition(id: string, epochNanoseconds: JSBI): JSBI | null {
+export function GetNamedTimeZoneNextTransition(id: string, epochNanoseconds: bigint): bigint | null {
   if (id === 'UTC') return null; // UTC fast path
 
   // Optimization: we floor the instant to the previous millisecond boundary
@@ -2804,7 +2804,7 @@ export function GetNamedTimeZoneNextTransition(id: string, epochNanoseconds: JSB
   return epochMsToNs(result);
 }
 
-export function GetNamedTimeZonePreviousTransition(id: string, epochNanoseconds: JSBI): JSBI | null {
+export function GetNamedTimeZonePreviousTransition(id: string, epochNanoseconds: bigint): bigint | null {
   if (id === 'UTC') return null; // UTC fast path
 
   // Optimization: we raise the instant to the next millisecond boundary so
@@ -2819,7 +2819,7 @@ export function GetNamedTimeZonePreviousTransition(id: string, epochNanoseconds:
   const lookahead = now + DAY_MS * 366 * 3;
   if (epochMilliseconds > lookahead) {
     const prevBeforeLookahead = GetNamedTimeZonePreviousTransition(id, epochMsToNs(lookahead));
-    if (prevBeforeLookahead === null || JSBI.lessThan(prevBeforeLookahead, epochMsToNs(now))) {
+    if (prevBeforeLookahead === null || prevBeforeLookahead < epochMsToNs(now)) {
       return prevBeforeLookahead;
     }
   }
@@ -2916,10 +2916,10 @@ function GetNamedTimeZoneEpochNanoseconds(id: string, isoDateTime: ISODateTime) 
   // Get the offset of one day before and after the requested calendar date and
   // clock time, avoiding overflows if near the edge of the Instant range.
   let ns = GetUTCEpochNanoseconds(isoDateTime);
-  let nsEarlier = JSBI.subtract(ns, DAY_NANOS_JSBI);
-  if (JSBI.lessThan(nsEarlier, NS_MIN)) nsEarlier = ns;
-  let nsLater = JSBI.add(ns, DAY_NANOS_JSBI);
-  if (JSBI.greaterThan(nsLater, NS_MAX)) nsLater = ns;
+  let nsEarlier = ns - BigInt(DAY_NANOS);
+  if (nsEarlier < NS_MIN) nsEarlier = ns;
+  let nsLater = ns + BigInt(DAY_NANOS);
+  if (nsLater > NS_MAX) nsLater = ns;
   const earlierOffsetNs = GetNamedTimeZoneOffsetNanoseconds(id, nsEarlier);
   const laterOffsetNs = GetNamedTimeZoneOffsetNanoseconds(id, nsLater);
 
@@ -2930,13 +2930,13 @@ function GetNamedTimeZoneEpochNanoseconds(id: string, isoDateTime: ISODateTime) 
   // offsets to see which one(s) will yield a matching exact time.
   const found = earlierOffsetNs === laterOffsetNs ? [earlierOffsetNs] : [earlierOffsetNs, laterOffsetNs];
   const candidates = found.map((offsetNanoseconds) => {
-    const epochNanoseconds = JSBI.subtract(ns, JSBI.BigInt(offsetNanoseconds));
+    const epochNanoseconds = ns - BigInt(offsetNanoseconds);
     const parts = GetNamedTimeZoneDateTimeParts(id, epochNanoseconds);
     if (CompareISODateTime(isoDateTime, parts) !== 0) return undefined;
     ValidateEpochNanoseconds(epochNanoseconds);
     return epochNanoseconds;
   });
-  return candidates.filter((x) => x !== undefined) as JSBI[];
+  return candidates.filter((x) => x !== undefined) as bigint[];
 }
 
 export function LeapYear(year: number) {
@@ -3220,7 +3220,7 @@ export function RejectDateTime(
 
 export function RejectDateTimeRange(isoDateTime: ISODateTime) {
   const ns = GetUTCEpochNanoseconds(isoDateTime);
-  if (JSBI.lessThan(ns, DATETIME_NS_MIN) || JSBI.greaterThan(ns, DATETIME_NS_MAX)) {
+  if (ns < DATETIME_NS_MIN || ns > DATETIME_NS_MAX) {
     // Because PlainDateTime's range is wider than Instant's range, the line
     // below will always throw. Calling `ValidateEpochNanoseconds` avoids
     // repeating the same error message twice.
@@ -3232,7 +3232,7 @@ export function RejectDateTimeRange(isoDateTime: ISODateTime) {
 function AssertISODateTimeWithinLimits(isoDateTime: ISODateTime) {
   const ns = GetUTCEpochNanoseconds(isoDateTime);
   assert(
-    JSBI.greaterThanOrEqual(ns, DATETIME_NS_MIN) && JSBI.lessThanOrEqual(ns, DATETIME_NS_MAX),
+    ns >= DATETIME_NS_MIN && ns <= DATETIME_NS_MAX,
     `${ISODateTimeToString(isoDateTime, 'iso8601', 'auto')} is outside the representable range`
   );
 }
@@ -3240,8 +3240,8 @@ function AssertISODateTimeWithinLimits(isoDateTime: ISODateTime) {
 // In the spec, IsValidEpochNanoseconds returns a boolean and call sites are
 // responsible for throwing. In the polyfill, ValidateEpochNanoseconds takes its
 // place so that we can DRY the throwing code.
-function ValidateEpochNanoseconds(epochNanoseconds: JSBI) {
-  if (JSBI.lessThan(epochNanoseconds, NS_MIN) || JSBI.greaterThan(epochNanoseconds, NS_MAX)) {
+function ValidateEpochNanoseconds(epochNanoseconds: bigint) {
+  if (epochNanoseconds < NS_MIN || epochNanoseconds > NS_MAX) {
     throw new RangeError('date/time value is outside of supported range');
   }
 }
@@ -3481,8 +3481,8 @@ function DifferenceTime(time1: TimeRecord, time2: TimeRecord) {
 }
 
 function DifferenceInstant(
-  ns1: JSBI,
-  ns2: JSBI,
+  ns1: bigint,
+  ns2: bigint,
   increment: number,
   smallestUnit: Temporal.TimeUnit,
   roundingMode: Temporal.RoundingMode
@@ -3523,15 +3523,15 @@ function DifferenceISODateTime(
 }
 
 function DifferenceZonedDateTime(
-  ns1: JSBI,
-  ns2: JSBI,
+  ns1: bigint,
+  ns2: bigint,
   timeZone: string,
   calendar: BuiltinCalendarId,
   largestUnit: Temporal.DateTimeUnit
 ) {
-  const nsDiff = JSBI.subtract(ns2, ns1);
-  if (JSBI.equal(nsDiff, ZERO)) return { date: ZeroDateDuration(), time: TimeDuration.ZERO };
-  const sign = JSBI.lessThan(nsDiff, ZERO) ? -1 : 1;
+  const nsDiff = ns2 - ns1;
+  if (nsDiff === ZERO) return { date: ZeroDateDuration(), time: TimeDuration.ZERO };
+  const sign = nsDiff < 0n ? -1 : 1;
 
   // Convert start/end instants to datetimes
   const isoDtStart = GetISODateTimeFor(timeZone, ns1);
@@ -3602,7 +3602,7 @@ function DifferenceZonedDateTime(
 function NudgeToCalendarUnit(
   sign: -1 | 1,
   durationParam: InternalDuration,
-  destEpochNs: JSBI,
+  destEpochNs: bigint,
   isoDateTime: ISODateTime,
   timeZone: string | null,
   calendar: BuiltinCalendarId,
@@ -3680,17 +3680,17 @@ function NudgeToCalendarUnit(
   // Round the smallestUnit within the epoch-nanosecond span
   if (sign === 1) {
     assert(
-      JSBI.lessThanOrEqual(startEpochNs, destEpochNs) && JSBI.lessThanOrEqual(destEpochNs, endEpochNs),
+      startEpochNs <= destEpochNs && destEpochNs <= endEpochNs,
       `${unit} was 0 days long`
     );
   }
   if (sign === -1) {
     assert(
-      JSBI.lessThanOrEqual(endEpochNs, destEpochNs) && JSBI.lessThanOrEqual(destEpochNs, startEpochNs),
+      endEpochNs <= destEpochNs && destEpochNs <= startEpochNs,
       `${unit} was 0 days long`
     );
   }
-  assert(!JSBI.equal(endEpochNs, startEpochNs), 'startEpochNs must ≠ endEpochNs');
+  assert(endEpochNs !== startEpochNs, 'startEpochNs must ≠ endEpochNs');
   const numerator = TimeDuration.fromEpochNsDiff(destEpochNs, startEpochNs);
   const denominator = TimeDuration.fromEpochNsDiff(endEpochNs, startEpochNs);
   const unsignedRoundingMode = GetUnsignedRoundingMode(roundingMode, sign < 0 ? 'negative' : 'positive');
@@ -3705,10 +3705,7 @@ function NudgeToCalendarUnit(
 
   // Trick to minimize rounding error, due to the lack of fma() in JS
   const fakeNumerator = new TimeDuration(
-    JSBI.add(
-      JSBI.multiply(denominator.totalNs, JSBI.BigInt(r1)),
-      JSBI.multiply(numerator.totalNs, JSBI.BigInt(increment * sign))
-    )
+    BigInt(denominator.totalNs) * BigInt(r1) + BigInt(numerator.totalNs) * BigInt(increment * sign)
   );
   const total = fakeNumerator.fdiv(denominator.totalNs);
   assert(Math.abs(r1) <= Math.abs(total) && Math.abs(total) <= Math.abs(r2), 'r1 ≤ total ≤ r2');
@@ -3758,7 +3755,7 @@ function NudgeToZonedTime(
 
   // Compute time parts of the duration to nanoseconds and round
   // Result could be negative
-  const unitIncrement = JSBI.BigInt(NS_PER_TIME_UNIT[unit] * increment);
+  const unitIncrement = BigInt(NS_PER_TIME_UNIT[unit] * increment);
   let roundedTimeDuration = duration.time.round(unitIncrement, roundingMode);
 
   // Does the rounded time exceed the time-in-day?
@@ -3791,7 +3788,7 @@ function NudgeToZonedTime(
 // Converts all fields to nanoseconds and does integer rounding.
 function NudgeToDayOrTime(
   durationParam: InternalDuration,
-  destEpochNs: JSBI,
+  destEpochNs: bigint,
   largestUnit: Temporal.DateTimeUnit,
   increment: number,
   smallestUnit: Temporal.TimeUnit | 'day',
@@ -3802,24 +3799,24 @@ function NudgeToDayOrTime(
 
   const timeDuration = duration.time.add24HourDays(duration.date.days);
   // Convert to nanoseconds and round
-  const roundedTime = timeDuration.round(JSBI.BigInt(increment * NS_PER_TIME_UNIT[smallestUnit]), roundingMode);
+  const roundedTime = timeDuration.round(BigInt(increment * NS_PER_TIME_UNIT[smallestUnit]), roundingMode);
   const diffTime = roundedTime.subtract(timeDuration);
 
   // Determine if whole days expanded
   const { quotient: wholeDays } = timeDuration.divmod(DAY_NANOS);
   const { quotient: roundedWholeDays } = roundedTime.divmod(DAY_NANOS);
-  const didExpandDays = Math.sign(roundedWholeDays - wholeDays) === timeDuration.sign();
+  const didExpandDays = Math.sign(Number(roundedWholeDays - wholeDays)) === timeDuration.sign();
 
   const nudgedEpochNs = diffTime.addToEpochNs(destEpochNs);
 
-  let days = 0;
+  let days = 0n;
   let remainder = roundedTime;
   if (TemporalUnitCategory(largestUnit) === 'date') {
     days = roundedWholeDays;
-    remainder = roundedTime.add(TimeDuration.fromComponents(-roundedWholeDays * 24, 0, 0, 0, 0, 0));
+    remainder = roundedTime.add(TimeDuration.fromComponents(-Number(roundedWholeDays * 24n), 0, 0, 0, 0, 0));
   }
 
-  const dateDuration = AdjustDateDurationRecord(duration.date, days);
+  const dateDuration = AdjustDateDurationRecord(duration.date, Number(days));
   return {
     duration: { date: dateDuration, time: remainder },
     nudgedEpochNs,
@@ -3832,7 +3829,7 @@ function NudgeToDayOrTime(
 function BubbleRelativeDuration(
   sign: -1 | 1,
   durationParam: InternalDuration,
-  nudgedEpochNs: JSBI,
+  nudgedEpochNs: bigint,
   isoDateTime: ISODateTime,
   timeZone: string | null,
   calendar: BuiltinCalendarId,
@@ -3910,7 +3907,7 @@ function BubbleRelativeDuration(
 
 function RoundRelativeDuration(
   durationParam: InternalDuration,
-  destEpochNs: JSBI,
+  destEpochNs: bigint,
   isoDateTime: ISODateTime,
   timeZone: string | null,
   calendar: BuiltinCalendarId,
@@ -3991,7 +3988,7 @@ function RoundRelativeDuration(
 
 function TotalRelativeDuration(
   duration: InternalDuration,
-  destEpochNs: JSBI,
+  destEpochNs: bigint,
   isoDateTime: ISODateTime,
   timeZone: string | null,
   calendar: BuiltinCalendarId,
@@ -4059,15 +4056,15 @@ export function DifferencePlainDateTimeWithTotal(
   RejectDateTimeRange(isoDateTime2);
   const duration = DifferenceISODateTime(isoDateTime1, isoDateTime2, calendar, unit);
 
-  if (unit === 'nanosecond') return JSBI.toNumber(duration.time.totalNs);
+  if (unit === 'nanosecond') return duration.time.totalNs;
 
   const destEpochNs = GetUTCEpochNanoseconds(isoDateTime2);
   return TotalRelativeDuration(duration, destEpochNs, isoDateTime1, null, calendar, unit);
 }
 
 export function DifferenceZonedDateTimeWithRounding(
-  ns1: JSBI,
-  ns2: JSBI,
+  ns1: bigint,
+  ns2: bigint,
   timeZone: string,
   calendar: BuiltinCalendarId,
   largestUnit: Temporal.DateTimeUnit,
@@ -4099,8 +4096,8 @@ export function DifferenceZonedDateTimeWithRounding(
 }
 
 export function DifferenceZonedDateTimeWithTotal(
-  ns1: JSBI,
-  ns2: JSBI,
+  ns1: bigint,
+  ns2: bigint,
   timeZone: string,
   calendar: BuiltinCalendarId,
   unit: Temporal.DateTimeUnit
@@ -4395,7 +4392,7 @@ export function DifferenceTemporalZonedDateTime(
       );
     }
 
-    if (JSBI.equal(ns1, ns2)) return new Duration();
+    if (ns1 === ns2) return new Duration();
 
     const duration = DifferenceZonedDateTimeWithRounding(
       ns1,
@@ -4426,14 +4423,14 @@ export function AddTime(
   return BalanceTime(hour, minute, second, millisecond, microsecond, nanosecond);
 }
 
-function AddInstant(epochNanoseconds: JSBI, timeDuration: TimeDuration) {
+function AddInstant(epochNanoseconds: bigint, timeDuration: TimeDuration) {
   const result = timeDuration.addToEpochNs(epochNanoseconds);
   ValidateEpochNanoseconds(result);
   return result;
 }
 
 export function AddZonedDateTime(
-  epochNs: JSBI,
+  epochNs: bigint,
   timeZone: string,
   calendar: BuiltinCalendarId,
   duration: InternalDuration,
@@ -4634,41 +4631,41 @@ export function RoundNumberToIncrement(quantity: number, increment: number, mode
 
 // ts-prune-ignore-next TODO: remove this after tests are converted to TS
 export function RoundNumberToIncrementAsIfPositive(
-  quantityParam: JSBI | bigint,
-  incrementParam: JSBI | bigint,
+  quantityParam: bigint,
+  incrementParam: bigint,
   mode: Temporal.RoundingMode
 ) {
-  const quantity = ensureJSBI(quantityParam);
-  const increment = ensureJSBI(incrementParam);
-  const quotient = JSBI.divide(quantity, increment);
-  const remainder = JSBI.remainder(quantity, increment);
+  const quantity = quantityParam;
+  const increment = incrementParam;
+  const quotient = quantity / increment;
+  const remainder = quantity % increment;
   const unsignedRoundingMode = GetUnsignedRoundingMode(mode, 'positive');
-  let r1: JSBI, r2: JSBI;
-  if (JSBI.lessThan(quantity, ZERO)) {
-    r1 = JSBI.subtract(quotient, ONE);
+  let r1: bigint, r2: bigint;
+  if (quantity < 0) {
+    r1 = quotient - ONE;
     r2 = quotient;
   } else {
     r1 = quotient;
-    r2 = JSBI.add(quotient, ONE);
+    r2 = quotient + ONE;
   }
   // Similar to the comparison in RoundNumberToIncrement, but multiplied by an
   // extra sign to make sure we treat it as positive
-  const cmp = (compare(abs(JSBI.multiply(remainder, TWO)), increment) * (JSBI.lessThan(quantity, ZERO) ? -1 : 1) +
+  const cmp = (compare(abs(remainder * TWO), increment) * (quantity < 0 ? -1 : 1) +
     0) as -1 | 0 | 1;
-  const rounded = JSBI.equal(remainder, ZERO)
+  const rounded = remainder === ZERO
     ? quotient
     : ApplyUnsignedRoundingMode(r1, r2, cmp, isEven(r1), unsignedRoundingMode);
-  return JSBI.multiply(rounded, increment);
+  return rounded * increment;
 }
 
 export function RoundTemporalInstant(
-  epochNs: JSBI,
+  epochNs: bigint,
   increment: number,
   unit: TimeUnitOrDay,
   roundingMode: Temporal.RoundingMode
 ) {
   const incrementNs = NS_PER_TIME_UNIT[unit] * increment;
-  return RoundNumberToIncrementAsIfPositive(epochNs, JSBI.BigInt(incrementNs), roundingMode);
+  return RoundNumberToIncrementAsIfPositive(epochNs, BigInt(incrementNs), roundingMode);
 }
 
 export function RoundISODateTime(
@@ -4741,12 +4738,12 @@ export function RoundTimeDuration(
 ) {
   // unit must be a time unit
   const divisor = NS_PER_TIME_UNIT[unit];
-  return timeDuration.round(JSBI.BigInt(divisor * increment), roundingMode);
+  return timeDuration.round(BigInt(divisor * increment), roundingMode);
 }
 
 export function TotalTimeDuration(timeDuration: TimeDuration, unit: TimeUnitOrDay) {
   const divisor = NS_PER_TIME_UNIT[unit];
-  return timeDuration.fdiv(JSBI.BigInt(divisor));
+  return timeDuration.fdiv(BigInt(divisor));
 }
 
 export function CompareISODate(isoDate1: ISODate, isoDate2: ISODate) {
@@ -4781,67 +4778,38 @@ export function CompareISODateTime(isoDateTime1: ISODateTime, isoDateTime2: ISOD
 type ExternalBigInt = bigint;
 
 export function ToBigIntExternal(arg: unknown): ExternalBigInt {
-  const jsbiBI = ToBigInt(arg);
+  const jsbiBI = BigInt(arg as string | number | bigint | boolean);
   if (typeof (globalThis as any).BigInt !== 'undefined') return (globalThis as any).BigInt(jsbiBI.toString(10));
   return jsbiBI as unknown as ExternalBigInt;
 }
 
 // rounding modes supported: floor, ceil, trunc
-export function epochNsToMs(epochNanosecondsParam: JSBI | bigint, mode: 'floor' | 'ceil' | 'trunc') {
-  const epochNanoseconds = ensureJSBI(epochNanosecondsParam);
+export function epochNsToMs(epochNanosecondsParam: bigint, mode: 'floor' | 'ceil' | 'trunc'): number {
+  const epochNanoseconds = epochNanosecondsParam;
   const { quotient, remainder } = divmod(epochNanoseconds, MILLION);
-  let epochMilliseconds = JSBI.toNumber(quotient);
-  if (mode === 'floor' && JSBI.toNumber(remainder) < 0) epochMilliseconds -= 1;
-  if (mode === 'ceil' && JSBI.toNumber(remainder) > 0) epochMilliseconds += 1;
+  let epochMilliseconds = ToNumber(quotient);
+  if (mode === 'floor' && remainder < 0) epochMilliseconds -= 1;
+  if (mode === 'ceil' && remainder > 0) epochMilliseconds += 1;
   return epochMilliseconds;
 }
 
-export function epochMsToNs(epochMilliseconds: number) {
+export function epochMsToNs(epochMilliseconds: number): bigint {
   if (!Number.isInteger(epochMilliseconds)) throw new RangeError('epoch milliseconds must be an integer');
-  return JSBI.multiply(JSBI.BigInt(epochMilliseconds), MILLION);
-}
-
-export function ToBigInt(arg: unknown): JSBI {
-  let prim = arg;
-  if (typeof arg === 'object') {
-    const toPrimFn = (arg as { [Symbol.toPrimitive]: unknown })[Symbol.toPrimitive];
-    if (toPrimFn && typeof toPrimFn === 'function') {
-      prim = toPrimFn.call(arg, 'number');
-    }
-  }
-
-  // The AO ToBigInt throws on numbers because it does not allow implicit
-  // conversion between number and bigint (unlike the bigint constructor).
-  if (typeof prim === 'number') {
-    throw new TypeError('cannot convert number to bigint');
-  }
-  if (typeof prim === 'bigint') {
-    // JSBI doesn't know anything about the bigint type, and intentionally
-    // assumes it doesn't exist. Passing one to the BigInt function will throw
-    // an error.
-    return JSBI.BigInt(prim.toString(10));
-  }
-  // JSBI will properly coerce types into a BigInt the same as the native BigInt
-  // constructor will, with the exception of native bigint which is handled
-  // above.
-  // As of 2023-04-07, the only runtime type that neither of those can handle is
-  // 'symbol', and both native bigint and the JSBI.BigInt function will throw an
-  // error if they are given a Symbol.
-  return JSBI.BigInt(prim as string | boolean | object);
+  return BigInt(epochMilliseconds) * MILLION;
 }
 
 // Note: This method returns values with bogus nanoseconds based on the previous iteration's
 // milliseconds. That way there is a guarantee that the full nanoseconds are always going to be
 // increasing at least and that the microsecond and nanosecond fields are likely to be non-zero.
-export const SystemUTCEpochNanoSeconds: () => JSBI = (() => {
-  let ns = JSBI.BigInt(Date.now() % 1e6);
+export const SystemUTCEpochNanoSeconds: () => bigint = (() => {
+  let ns = BigInt(Date.now() % 1e6);
   return () => {
     const now = Date.now();
-    const ms = JSBI.BigInt(now);
-    const result = JSBI.add(epochMsToNs(now), ns);
-    ns = JSBI.remainder(ms, MILLION);
-    if (JSBI.greaterThan(result, NS_MAX)) return NS_MAX;
-    if (JSBI.lessThan(result, NS_MIN)) return NS_MIN;
+    const ms = BigInt(now);
+    const result = epochMsToNs(now) + ns;
+    ns = ms % MILLION;
+    if (result > NS_MAX) return NS_MAX;
+    if (result < NS_MIN) return NS_MIN;
     return result;
   };
 })();
